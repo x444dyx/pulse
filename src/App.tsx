@@ -388,7 +388,7 @@ export default function App() {
       </div>
 
       {/* Footer Branding */}
-      <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center opacity-40 px-4 pb-[env(safe-area-inset-bottom)]">
+      <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center opacity-40 px-4 pb-[env(safe-area-inset-bottom)]">
         <span className="text-[10px] uppercase tracking-[0.3em] font-medium text-center">
           Created by{' '}
           <a 

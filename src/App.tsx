@@ -13,10 +13,22 @@ const TOLERANCE = 20;
 const INITIAL_GROWTH_RATE = 2.5;
 const GROWTH_ACCELERATION = 8; // Pixels per second squared
 
+type Shape = 'circle' | 'square' | 'triangle' | 'star';
 type GameState = 'START' | 'COUNTDOWN' | 'PLAYING' | 'GAMEOVER';
+
+const SHAPE_PATHS: Record<Shape, string> = {
+  circle: 'circle(50% at 50% 50%)',
+  square: 'inset(0%)',
+  triangle: 'polygon(50% 0%, 0% 100%, 100% 100%)',
+  star: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'
+};
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>('START');
+  const [shape, setShape] = useState<Shape>(() => {
+    const saved = localStorage.getItem('pulse-shape');
+    return (saved as Shape) || 'circle';
+  });
   const [countdown, setCountdown] = useState(3);
   const [score, setScore] = useState(0);
   const [bestScore, setBestScore] = useState(() => {
@@ -33,6 +45,7 @@ export default function App() {
   const pulseRadiusRef = useRef(0);
   const pulseElementRef = useRef<HTMLDivElement>(null);
   const targetRingRef = useRef<HTMLDivElement>(null);
+  const targetOuterRef = useRef<HTMLDivElement>(null);
 
   // --- Game Logic ---
 
@@ -95,7 +108,11 @@ export default function App() {
     }
   }, [gameState, countdown]);
 
-  const handleTap = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+  useEffect(() => {
+    localStorage.setItem('pulse-shape', shape);
+  }, [shape]);
+
+  const handleTap = useCallback((e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     // Use a ref for gameState to avoid stale closure and unnecessary re-renders
     if (gameStateRef.current !== 'PLAYING') return;
     
@@ -114,10 +131,18 @@ export default function App() {
       const perfect = diff < 8;
       
       // Direct DOM update for success feedback
-      if (targetRingRef.current) {
-        targetRingRef.current.style.borderColor = 'white';
+      if (targetRingRef.current && targetOuterRef.current) {
         targetRingRef.current.style.transform = 'scale(1.05) translateZ(0)';
-        targetRingRef.current.style.boxShadow = '0 0 20px rgba(255,255,255,0.4)';
+        targetOuterRef.current.style.opacity = '1';
+        targetOuterRef.current.style.backgroundColor = 'white';
+        
+        // Use appropriate glow method based on shape
+        if (shape === 'circle' || shape === 'square') {
+          targetOuterRef.current.style.boxShadow = '0 0 20px rgba(255,255,255,0.6)';
+        } else {
+          // clip-path doesn't support box-shadow, use drop-shadow filter instead
+          targetOuterRef.current.style.filter = 'drop-shadow(0 0 10px rgba(255,255,255,0.8))';
+        }
       }
       
       setIsPerfect(perfect);
@@ -133,10 +158,12 @@ export default function App() {
 
       setTimeout(() => {
         setIsPerfect(false);
-        if (targetRingRef.current) {
-          targetRingRef.current.style.borderColor = '';
+        if (targetRingRef.current && targetOuterRef.current) {
           targetRingRef.current.style.transform = '';
-          targetRingRef.current.style.boxShadow = '';
+          targetRingRef.current.style.opacity = '';
+          targetOuterRef.current.style.backgroundColor = '';
+          targetOuterRef.current.style.boxShadow = '';
+          targetOuterRef.current.style.filter = '';
         }
       }, 200);
     } else {
@@ -160,6 +187,25 @@ export default function App() {
   // --- Actions ---
 
   const isSharingRef = useRef(false);
+
+  const getShapeStyle = (s: Shape, size: number) => {
+    const style: React.CSSProperties = {
+      width: size,
+      height: size,
+    };
+    
+    if (s === 'circle') {
+      style.borderRadius = '50%';
+    } else if (s === 'square') {
+      style.borderRadius = '0%';
+    } else {
+      style.clipPath = SHAPE_PATHS[s];
+      // @ts-ignore
+      style.WebkitClipPath = SHAPE_PATHS[s];
+    }
+    
+    return style;
+  };
 
   const copyToClipboard = async (plainText: string, htmlText: string) => {
     try {
@@ -237,6 +283,37 @@ export default function App() {
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-white/[0.02] md:bg-white/5 md:blur-[120px] rounded-full" />
       </div>
 
+      {/* Shape Selector - Floating at top */}
+      <AnimatePresence>
+        {(gameState === 'START' || gameState === 'GAMEOVER') && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-12 flex items-center gap-4 bg-white/5 p-2 rounded-2xl backdrop-blur-md border border-white/10 z-50"
+          >
+            {(['circle', 'square', 'triangle', 'star'] as Shape[]).map((s) => (
+              <button
+                key={s}
+                onClick={(e) => { e.stopPropagation(); setShape(s); }}
+                className={`w-12 h-12 flex flex-col items-center justify-center rounded-xl transition-all gap-1 ${
+                  shape === s ? 'bg-white text-black scale-105 shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <div 
+                  className="w-4 h-4"
+                  style={{ 
+                    ...getShapeStyle(s, 16),
+                    backgroundColor: shape === s ? 'black' : 'currentColor'
+                  }}
+                />
+                <span className="text-[8px] uppercase font-bold tracking-tighter">{s}</span>
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Main Game Area */}
       <div className="relative flex flex-col items-center justify-center w-full max-w-md px-6">
         
@@ -261,30 +338,48 @@ export default function App() {
 
         {/* Game Visuals */}
         <div className="relative w-[300px] h-[300px] flex items-center justify-center">
-          {/* Target Ring */}
+          {/* Target Ring Container */}
           <div 
             ref={targetRingRef}
-            className={`absolute rounded-full border-2 transition-all duration-150 will-change-transform ${
-              gameState === 'PLAYING' ? 'border-white/20' : 'border-white/5'
+            className={`absolute transition-all duration-150 will-change-transform flex items-center justify-center ${
+              gameState === 'PLAYING' ? 'opacity-100' : 'opacity-20'
             }`}
-            style={{ width: TARGET_RADIUS * 2, height: TARGET_RADIUS * 2 }}
-          />
+            style={{ 
+              width: TARGET_RADIUS * 2, 
+              height: TARGET_RADIUS * 2,
+            }}
+          >
+            {/* Outer Shape (Border) */}
+            <div 
+              ref={targetOuterRef}
+              className="absolute inset-0 bg-white/20 transition-colors duration-150"
+              style={getShapeStyle(shape, TARGET_RADIUS * 2)}
+            />
+            {/* Inner Shape (Hole) */}
+            <div 
+              className="absolute bg-[#050505]"
+              style={{ 
+                ...getShapeStyle(shape, TARGET_RADIUS * 2 - 4),
+                width: TARGET_RADIUS * 2 - 4,
+                height: TARGET_RADIUS * 2 - 4,
+              }}
+            />
+          </div>
           
           {/* Pulse Circle */}
           {gameState === 'PLAYING' && (
             <div 
               ref={pulseElementRef}
-              className={`absolute rounded-full border-2 will-change-transform translate-z-0 ${
+              className={`absolute will-change-transform translate-z-0 ${
                 isPerfect 
-                  ? 'border-white bg-white shadow-[0_0_40px_rgba(255,255,255,0.6)]' 
-                  : 'border-white/40 bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]'
+                  ? 'bg-white shadow-[0_0_40px_rgba(255,255,255,0.6)]' 
+                  : 'bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]'
               }`}
               style={{ 
-                width: 300, 
-                height: 300,
+                ...getShapeStyle(shape, 300),
                 transform: 'scale(0) translateZ(0)',
                 opacity: 0.2,
-                backfaceVisibility: 'hidden'
+                backfaceVisibility: 'hidden',
               }}
             />
           )}

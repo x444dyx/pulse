@@ -228,7 +228,7 @@ export default function App() {
 
   return (
     <div 
-      className="relative h-screen w-full flex flex-col items-center justify-center overflow-hidden bg-[#050505] select-none touch-none"
+      className="relative min-h-screen w-full flex flex-col items-center justify-center overflow-hidden bg-[#050505] select-none touch-none"
       onPointerDown={handleTap}
     >
       {/* Background Ambient Glow - Removed blur for mobile performance */}

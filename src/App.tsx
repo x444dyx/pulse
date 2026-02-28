@@ -388,14 +388,14 @@ export default function App() {
       </div>
 
       {/* Footer Branding */}
-      <div className="absolute bottom-12 left-0 right-0 flex flex-col items-center gap-4 opacity-20">
-        <span className="text-[10px] uppercase tracking-[0.5em] font-medium pointer-events-none">
-          Created By{' '}
+      <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center opacity-40 px-4 pb-[env(safe-area-inset-bottom)]">
+        <span className="text-[10px] uppercase tracking-[0.3em] font-medium text-center">
+          Created by{' '}
           <a 
             href="https://www.doubleakit.com" 
             target="_blank" 
             rel="noopener noreferrer"
-            className="pointer-events-auto hover:underline transition-all"
+            className="hover:underline transition-all"
           >
             DoubleAKit
           </a>

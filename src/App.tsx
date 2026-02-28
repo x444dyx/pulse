@@ -426,7 +426,7 @@ export default function App() {
               className="absolute inset-0 flex flex-col items-center justify-center z-10"
             >
               <h1 className="text-7xl font-light tracking-tighter mb-2">Pulse</h1>
-              <p className="text-white/40 text-sm tracking-wide mb-12">Tap when circles align.</p>
+              <p className="text-white/40 text-sm tracking-wide mb-12">Tap when shape aligns with outer shape.</p>
               
               <button 
                 onClick={(e) => { e.stopPropagation(); startGame(); }}

@@ -487,12 +487,12 @@ export default function App() {
         <span className="text-[10px] uppercase tracking-[0.3em] font-medium text-center">
           Created by{' '}
           <a 
-            href="https://www.doubleakit.com" 
+            href="https://www.ayteelabs.com" 
             target="_blank" 
             rel="noopener noreferrer"
             className="hover:underline transition-all"
           >
-            DoubleAKit
+            AyTee Labs
           </a>
         </span>
       </div>

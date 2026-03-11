@@ -5,7 +5,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Share2, RotateCcw, Trophy, Copy, Check, Zap } from 'lucide-react';
+import { Share2, RotateCcw, Trophy, Check, Zap } from 'lucide-react';
+import { fetchTopScores, submitScore, type LeaderboardEntry } from './lib/leaderboard';
 
 // --- Constants ---
 const TARGET_RADIUS = 120;
@@ -37,17 +38,35 @@ export default function App() {
   });
   const [showToast, setShowToast] = useState(false);
   const [isPerfect, setIsPerfect] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
 
-  const requestRef = useRef<number>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [playerName, setPlayerName] = useState('');
+  const [isSubmittingScore, setIsSubmittingScore] = useState(false);
+  const [scoreSubmitted, setScoreSubmitted] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState('');
+
+  const requestRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const growthRateRef = useRef(120); // Pixels per second (1 second to reach target)
   const pulseRadiusRef = useRef(0);
-  const pulseElementRef = useRef<HTMLDivElement>(null);
-  const targetRingRef = useRef<HTMLDivElement>(null);
-  const targetOuterRef = useRef<HTMLDivElement>(null);
+  const pulseElementRef = useRef<HTMLDivElement | null>(null);
+  const targetRingRef = useRef<HTMLDivElement | null>(null);
+  const targetOuterRef = useRef<HTMLDivElement | null>(null);
+
+  const gameStateRef = useRef(gameState);
 
   // --- Game Logic ---
+
+  const loadLeaderboard = useCallback(async () => {
+    try {
+      const data = await fetchTopScores();
+      setLeaderboard(data);
+      setLeaderboardError('');
+    } catch (err) {
+      console.error(err);
+      setLeaderboardError('Could not load leaderboard');
+    }
+  }, []);
 
   const update = useCallback((time: number) => {
     if (gameStateRef.current !== 'PLAYING') return;
@@ -62,12 +81,14 @@ export default function App() {
     lastTimeRef.current = time;
 
     pulseRadiusRef.current += growthRateRef.current * deltaTime;
-    
-    // Direct DOM update for performance
+
     if (pulseElementRef.current) {
-      const scale = (pulseRadiusRef.current * 2) / 300; // Relative to container size
+      const scale = (pulseRadiusRef.current * 2) / 300;
       pulseElementRef.current.style.transform = `scale(${scale})`;
-      pulseElementRef.current.style.opacity = Math.max(0.2, 1 - pulseRadiusRef.current / (TARGET_RADIUS + TOLERANCE + 60)).toString();
+      pulseElementRef.current.style.opacity = Math.max(
+        0.2,
+        1 - pulseRadiusRef.current / (TARGET_RADIUS + TOLERANCE + 60)
+      ).toString();
     }
 
     if (pulseRadiusRef.current > TARGET_RADIUS + TOLERANCE + 40) {
@@ -78,7 +99,6 @@ export default function App() {
     requestRef.current = requestAnimationFrame(update);
   }, []);
 
-  const gameStateRef = useRef(gameState);
   useEffect(() => {
     gameStateRef.current = gameState;
     if (gameState === 'PLAYING') {
@@ -95,6 +115,9 @@ export default function App() {
     growthRateRef.current = 120;
     setGameState('COUNTDOWN');
     setCountdown(3);
+    setPlayerName('');
+    setScoreSubmitted(false);
+    setLeaderboardError('');
   };
 
   useEffect(() => {
@@ -112,42 +135,45 @@ export default function App() {
     localStorage.setItem('pulse-shape', shape);
   }, [shape]);
 
+  useEffect(() => {
+    loadLeaderboard();
+  }, [loadLeaderboard]);
+
+  useEffect(() => {
+    if (gameState === 'GAMEOVER') {
+      loadLeaderboard();
+      setScoreSubmitted(false);
+      setPlayerName('');
+    }
+  }, [gameState, loadLeaderboard]);
+
   const handleTap = useCallback((e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
-    // Use a ref for gameState to avoid stale closure and unnecessary re-renders
     if (gameStateRef.current !== 'PLAYING') return;
-    
-    // Prevent simulated mouse events on mobile
+
     if (e.type === 'touchstart') {
-      // We don't preventDefault here to allow the event to be handled, 
-      // but we should be careful about double firing.
-      // Actually, using only onPointerDown is often better for cross-platform.
+      // Intentionally left blank
     }
 
     const currentRadius = pulseRadiusRef.current;
     const diff = Math.abs(currentRadius - TARGET_RADIUS);
 
     if (diff <= TOLERANCE) {
-      // Success!
       const perfect = diff < 8;
-      
-      // Direct DOM update for success feedback
+
       if (targetRingRef.current && targetOuterRef.current) {
         targetRingRef.current.style.transform = 'scale(1.05) translateZ(0)';
         targetOuterRef.current.style.opacity = '1';
         targetOuterRef.current.style.backgroundColor = 'white';
-        
-        // Use appropriate glow method based on shape
+
         if (shape === 'circle' || shape === 'square') {
           targetOuterRef.current.style.boxShadow = '0 0 20px rgba(255,255,255,0.6)';
         } else {
-          // clip-path doesn't support box-shadow, use drop-shadow filter instead
           targetOuterRef.current.style.filter = 'drop-shadow(0 0 10px rgba(255,255,255,0.8))';
         }
       }
-      
+
       setIsPerfect(perfect);
-      
-      // Reset pulse and increase speed
+
       pulseRadiusRef.current = 0;
       if (pulseElementRef.current) {
         pulseElementRef.current.style.transform = 'scale(0) translateZ(0)';
@@ -169,7 +195,7 @@ export default function App() {
     } else {
       setGameState('GAMEOVER');
     }
-  }, []);
+  }, [shape]);
 
   useEffect(() => {
     if (score > bestScore) {
@@ -193,7 +219,7 @@ export default function App() {
       width: size,
       height: size,
     };
-    
+
     if (s === 'circle') {
       style.borderRadius = '50%';
     } else if (s === 'square') {
@@ -203,7 +229,7 @@ export default function App() {
       // @ts-ignore
       style.WebkitClipPath = SHAPE_PATHS[s];
     }
-    
+
     return style;
   };
 
@@ -224,7 +250,6 @@ export default function App() {
       setTimeout(() => setShowToast(false), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
-      // Fallback to simple text copy
       navigator.clipboard.writeText(plainText).then(() => {
         setShowToast(true);
         setTimeout(() => setShowToast(false), 2000);
@@ -234,11 +259,11 @@ export default function App() {
 
   const shareScore = async () => {
     if (isSharingRef.current) return;
-    
+
     const url = window.location.href;
     const shareTitle = 'Pulse ⚡️';
     const shareText = `I just scored ${score} on Pulse! \n\nCan you beat my score? \n\nPlay here:`;
-    
+
     const plainText = `${shareTitle}\n${shareText}\n${url}`;
     const htmlText = `
       <div style="font-family: sans-serif;">
@@ -270,44 +295,64 @@ export default function App() {
     }
   };
 
+  const handleSubmitScore = async () => {
+    if (isSubmittingScore || scoreSubmitted) return;
+
+    try {
+      setIsSubmittingScore(true);
+      setLeaderboardError('');
+      await submitScore(playerName, score);
+      setScoreSubmitted(true);
+      await loadLeaderboard();
+    } catch (err) {
+      console.error(err);
+      setLeaderboardError(err instanceof Error ? err.message : 'Failed to submit score');
+    } finally {
+      setIsSubmittingScore(false);
+    }
+  };
+
   // --- Components ---
 
   return (
-    <div 
-      className="relative min-h-screen w-full flex flex-col items-center justify-center overflow-hidden bg-[#050505] select-none touch-none"
+    <div
+      className="relative min-h-screen w-full flex flex-col items-center justify-center bg-[#050505] select-none touch-none"
       onPointerDown={handleTap}
     >
-      {/* Background Ambient Glow - Removed blur for mobile performance */}
+      {/* Background Ambient Glow */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-white/[0.02] md:bg-white/5 md:blur-[120px] rounded-full" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-white/[0.02] md:bg-white/5 md:blur-[120px] rounded-full" />
       </div>
 
-      {/* Shape Selector - Floating at top */}
+      {/* Shape Selector */}
       <AnimatePresence>
         {(gameState === 'START' || gameState === 'GAMEOVER') && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="absolute top-12 flex items-center gap-4 bg-white/5 p-2 rounded-2xl backdrop-blur-md border border-white/10 z-50"
+            className="fixed top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 sm:gap-4 bg-white/5 p-2 rounded-2xl backdrop-blur-md border border-white/10 z-50"
           >
             {(['circle', 'square', 'triangle', 'star'] as Shape[]).map((s) => (
               <button
                 key={s}
-                onClick={(e) => { e.stopPropagation(); setShape(s); }}
-                className={`w-12 h-12 flex flex-col items-center justify-center rounded-xl transition-all gap-1 ${
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShape(s);
+                }}
+                className={`w-10 h-10 sm:w-12 sm:h-12 flex flex-col items-center justify-center rounded-xl transition-all gap-1 ${
                   shape === s ? 'bg-white text-black scale-105 shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <div 
+                <div
                   className="w-4 h-4"
-                  style={{ 
+                  style={{
                     ...getShapeStyle(s, 16),
                     backgroundColor: shape === s ? 'black' : 'currentColor'
                   }}
                 />
-                <span className="text-[8px] uppercase font-bold tracking-tighter">{s}</span>
+                <span className="text-[7px] sm:text-[8px] uppercase font-bold tracking-tighter">{s}</span>
               </button>
             ))}
           </motion.div>
@@ -315,18 +360,17 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Game Area */}
-      <div className="relative flex flex-col items-center justify-center w-full max-w-md px-6">
-        
+      <div className="relative flex flex-col items-center justify-center w-full max-w-md px-4 sm:px-6 min-h-[760px] sm:min-h-[820px] pt-28 sm:pt-24">
         {/* Score Display */}
         <AnimatePresence mode="wait">
           {gameState === 'PLAYING' && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="absolute top-[-120px] flex flex-col items-center"
+              className="absolute left-1/2 -translate-x-1/2 top-6 sm:top-10 flex flex-col items-center z-30"
             >
-              <span className="text-6xl font-light tracking-tighter tabular-nums">
+              <span className="text-5xl sm:text-6xl font-light tracking-tighter tabular-nums">
                 {score}
               </span>
               <span className="text-[10px] uppercase tracking-[0.2em] text-white/40 mt-2">
@@ -338,44 +382,40 @@ export default function App() {
 
         {/* Game Visuals */}
         <div className="relative w-[300px] h-[300px] flex items-center justify-center">
-          {/* Target Ring Container */}
-          <div 
+          <div
             ref={targetRingRef}
             className={`absolute transition-all duration-150 will-change-transform flex items-center justify-center ${
               gameState === 'PLAYING' ? 'opacity-100' : 'opacity-20'
             }`}
-            style={{ 
-              width: TARGET_RADIUS * 2, 
+            style={{
+              width: TARGET_RADIUS * 2,
               height: TARGET_RADIUS * 2,
             }}
           >
-            {/* Outer Shape (Border) */}
-            <div 
+            <div
               ref={targetOuterRef}
               className="absolute inset-0 bg-white/20 transition-colors duration-150"
               style={getShapeStyle(shape, TARGET_RADIUS * 2)}
             />
-            {/* Inner Shape (Hole) */}
-            <div 
+            <div
               className="absolute bg-[#050505]"
-              style={{ 
+              style={{
                 ...getShapeStyle(shape, TARGET_RADIUS * 2 - 4),
                 width: TARGET_RADIUS * 2 - 4,
                 height: TARGET_RADIUS * 2 - 4,
               }}
             />
           </div>
-          
-          {/* Pulse Circle */}
+
           {gameState === 'PLAYING' && (
-            <div 
+            <div
               ref={pulseElementRef}
               className={`absolute will-change-transform translate-z-0 ${
-                isPerfect 
-                  ? 'bg-white shadow-[0_0_40px_rgba(255,255,255,0.6)]' 
+                isPerfect
+                  ? 'bg-white shadow-[0_0_40px_rgba(255,255,255,0.6)]'
                   : 'bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]'
               }`}
-              style={{ 
+              style={{
                 ...getShapeStyle(shape, 300),
                 transform: 'scale(0) translateZ(0)',
                 opacity: 0.2,
@@ -384,7 +424,6 @@ export default function App() {
             />
           )}
 
-          {/* Countdown Overlay - Now inside the relative container for perfect centering */}
           <AnimatePresence>
             {gameState === 'COUNTDOWN' && (
               <motion.div
@@ -401,7 +440,6 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Perfect Hit Indicator */}
           <AnimatePresence>
             {isPerfect && (
               <motion.div
@@ -419,18 +457,21 @@ export default function App() {
         {/* Start Screen */}
         <AnimatePresence>
           {gameState === 'START' && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="absolute inset-0 flex flex-col items-center justify-center z-10"
             >
-              <h1 className="text-7xl font-light tracking-tighter mb-2">Pulse</h1>
-              <p className="text-white/40 text-sm tracking-wide mb-12">Tap when shape aligns with outer shape.</p>
-              
-              <button 
-                onClick={(e) => { e.stopPropagation(); startGame(); }}
-                className="spring-button glass px-12 py-4 rounded-full text-lg font-medium tracking-wide flex items-center gap-3"
+              <h1 className="text-6xl sm:text-7xl font-light tracking-tighter mb-2">Pulse</h1>
+              <p className="text-white/40 text-sm tracking-wide mb-12">Tap when circles align.</p>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startGame();
+                }}
+                className="spring-button glass px-10 sm:px-12 py-4 rounded-full text-lg font-medium tracking-wide flex items-center gap-3"
               >
                 <Zap size={20} className="fill-white" />
                 Start Game
@@ -447,35 +488,104 @@ export default function App() {
         {/* Game Over Screen */}
         <AnimatePresence>
           {gameState === 'GAMEOVER' && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="absolute inset-0 flex flex-col items-center justify-center z-20 glass rounded-[40px] p-8 shadow-2xl"
+              className="absolute inset-x-0 top-20 bottom-0 sm:inset-0 z-20 glass rounded-[32px] sm:rounded-[40px] p-4 sm:p-6 shadow-2xl overflow-y-auto flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <span className="text-white/40 text-xs uppercase tracking-[0.3em] mb-4">Game Over</span>
-              <div className="text-8xl font-light tracking-tighter mb-2">{score}</div>
-              <div className="flex items-center gap-2 text-white/40 mb-12">
-                <Trophy size={14} />
-                <span className="text-xs uppercase tracking-widest">Best: {bestScore}</span>
-              </div>
+              <div className="flex flex-col items-center">
+                <span className="text-white/40 text-xs uppercase tracking-[0.3em] mb-4">Game Over</span>
+                <div className="text-7xl sm:text-8xl font-light tracking-tighter mb-2">{score}</div>
+                <div className="flex items-center gap-2 text-white/40 mb-8">
+                  <Trophy size={14} />
+                  <span className="text-xs uppercase tracking-widest">Best: {bestScore}</span>
+                </div>
 
-              <div className="grid grid-cols-2 gap-4 w-full">
-                <button 
-                  onClick={startGame}
-                  className="spring-button bg-white text-black px-6 py-4 rounded-2xl font-semibold flex flex-col items-center justify-center gap-2"
-                >
-                  <RotateCcw size={20} />
-                  <span className="text-[10px] uppercase tracking-widest">Try Again</span>
-                </button>
-                <button 
-                  onClick={shareScore}
-                  className="spring-button glass px-6 py-4 rounded-2xl font-semibold flex flex-col items-center justify-center gap-2"
-                >
-                  <Share2 size={20} />
-                  <span className="text-[10px] uppercase tracking-widest">Share</span>
-                </button>
+                <div className="w-full max-w-sm mb-6">
+                  <div className="text-[10px] uppercase tracking-[0.25em] text-white/40 mb-3 text-center">
+                    Submit your score
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="text"
+                      value={playerName}
+                      onChange={(e) => setPlayerName(e.target.value)}
+                      maxLength={12}
+                      placeholder="Your name"
+                      className="flex-1 bg-white/10 border border-white/10 rounded-2xl px-4 py-3 outline-none text-white placeholder:text-white/30"
+                      disabled={isSubmittingScore || scoreSubmitted}
+                    />
+                    <button
+                      onClick={handleSubmitScore}
+                      disabled={isSubmittingScore || scoreSubmitted || playerName.trim().length < 2}
+                      className="spring-button bg-white text-black px-5 py-3 rounded-2xl font-semibold disabled:opacity-50 w-full sm:w-auto"
+                    >
+                      {scoreSubmitted ? 'Done' : isSubmittingScore ? 'Saving...' : 'Submit'}
+                    </button>
+                  </div>
+
+                  {leaderboardError && (
+                    <p className="text-red-300 text-xs mt-3 text-center">{leaderboardError}</p>
+                  )}
+                </div>
+
+                <div className="w-full max-w-sm mb-8">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[10px] uppercase tracking-[0.25em] text-white/40">
+                      Global Top 100
+                    </span>
+                    <span className="text-[10px] uppercase tracking-[0.25em] text-white/25">
+                      Name / Score
+                    </span>
+                  </div>
+
+                  <div className="max-h-56 sm:max-h-80 overflow-y-auto rounded-3xl border border-white/10 bg-white/5">
+                    {leaderboard.length === 0 ? (
+                      <div className="p-6 text-center text-white/40 text-sm">
+                        No scores yet
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/5">
+                        {leaderboard.map((entry, index) => (
+                          <div
+                            key={entry.id}
+                            className="grid grid-cols-[56px_1fr_auto] items-center gap-3 px-4 py-3"
+                          >
+                            <span className="text-sm text-white/40 tabular-nums">
+                              #{index + 1}
+                            </span>
+                            <span className="text-sm font-medium truncate">
+                              {entry.name}
+                            </span>
+                            <span className="text-sm tabular-nums text-white/80">
+                              {entry.score}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-sm">
+                  <button
+                    onClick={startGame}
+                    className="spring-button bg-white text-black px-6 py-4 rounded-2xl font-semibold flex flex-col items-center justify-center gap-2"
+                  >
+                    <RotateCcw size={20} />
+                    <span className="text-[10px] uppercase tracking-widest">Try Again</span>
+                  </button>
+                  <button
+                    onClick={shareScore}
+                    className="spring-button glass px-6 py-4 rounded-2xl font-semibold flex flex-col items-center justify-center gap-2"
+                  >
+                    <Share2 size={20} />
+                    <span className="text-[10px] uppercase tracking-widest">Share</span>
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
@@ -486,9 +596,9 @@ export default function App() {
       <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center opacity-40 px-4 pb-[env(safe-area-inset-bottom)]">
         <span className="text-[10px] uppercase tracking-[0.3em] font-medium text-center">
           Created by{' '}
-          <a 
-            href="https://www.ayteelabs.com" 
-            target="_blank" 
+          <a
+            href="https://www.ayteelabs.com"
+            target="_blank"
             rel="noopener noreferrer"
             className="hover:underline transition-all"
           >
@@ -500,7 +610,7 @@ export default function App() {
       {/* Toast Notification */}
       <AnimatePresence>
         {showToast && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}

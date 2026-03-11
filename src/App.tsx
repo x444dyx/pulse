@@ -260,7 +260,7 @@ export default function App() {
   const shareScore = async () => {
     if (isSharingRef.current) return;
 
-    const url = window.location.href;
+    const url = 'https://pulse.ayteelabs.com';
     const shareTitle = 'Pulse ⚡️';
     const shareText = `I just scored ${score} on Pulse! \n\nCan you beat my score? \n\nPlay here:`;
 
